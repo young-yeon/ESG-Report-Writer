@@ -14,6 +14,7 @@ import {
 import { readUpload, isSupportedFile } from "./file-extractors.js";
 import {
   callChatCompletion,
+  getErrorDiagnostics,
   isContextLimitError,
   normalizeGenerationError
 } from "./llm.js";
@@ -375,13 +376,14 @@ async function handleFileSelection(event) {
   await waitForUiUpdate();
 
   try {
+    const maxTotalFileChars = getMaxTotalFileChars();
     for (let index = 0; index < supportedFiles.length; index += 1) {
       const file = supportedFiles[index];
       renderExtractionProgress(supportedFiles, index);
       setMessage(`첨부 자료 텍스트 추출 중 (${index + 1}/${supportedFiles.length})`, "loading");
       await waitForUiUpdate();
 
-      const fileInfo = await readUpload(file, MAX_TOTAL_FILE_CHARS - totalChars);
+      const fileInfo = await readUpload(file, maxTotalFileChars - totalChars);
       totalChars += fileInfo.content.length;
       uploadedFiles.push(fileInfo);
       renderExtractionProgress(supportedFiles, index + 1);
@@ -467,6 +469,13 @@ function getDisplayFileType(fileName) {
   return getFileExtension(fileName).toUpperCase() || "FILE";
 }
 
+function getMaxTotalFileChars() {
+  const configured = Number(appConfig.maxTotalFileChars);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : MAX_TOTAL_FILE_CHARS;
+}
+
 function waitForUiUpdate() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -547,7 +556,7 @@ async function generateReports() {
       }
 
       errors.push(planResult.reason);
-      showGenerationError(key, planResult.reason);
+      showGenerationError(key, planResult.reason, { stage: "설계 JSON 생성" });
     });
 
     if (renderTargets.length > 0) {
@@ -572,7 +581,7 @@ async function generateReports() {
       }
 
       errors.push(renderResult.reason);
-      showGenerationError(target.key, renderResult.reason, { plan: target.plan });
+      showGenerationError(target.key, renderResult.reason, { plan: target.plan, stage: "HTML 변환" });
     });
 
     if (errors.some(isContextLimitError)) {
@@ -580,9 +589,9 @@ async function generateReports() {
     } else if (errors.length === 0) {
       setMessage("완료", "done");
     } else if (errors.length === 1) {
-      setMessage("일부 오류", "error");
+      setMessage(`오류: ${shortStatusMessage(normalizeGenerationError(errors[0]))}`, "error");
     } else {
-      setMessage("오류", "error");
+      setMessage(`오류 ${errors.length}건: ${shortStatusMessage(normalizeGenerationError(errors[0]))}`, "error");
     }
   } finally {
     elements.generateButton.disabled = false;
@@ -645,8 +654,16 @@ function parseModelJson(rawText) {
 
   try {
     return JSON.parse(candidate);
-  } catch {
-    throw new Error("보고서 설계 JSON을 해석할 수 없습니다.");
+  } catch (error) {
+    const parseError = new Error("보고서 설계 JSON을 해석할 수 없습니다. 모델 출력이 JSON이 아니거나 중간에 잘렸을 수 있습니다.");
+    parseError.diagnostics = [
+      { label: "파서 오류", value: error.message },
+      { label: "LLM 응답 길이", value: `${text.length}자` },
+      { label: "JSON 후보 길이", value: `${candidate.length}자` },
+      { label: "LLM 응답 미리보기", value: previewDiagnosticText(text) || "빈 응답" },
+      { label: "JSON 후보 미리보기", value: previewDiagnosticText(candidate) || "후보 없음" }
+    ];
+    throw parseError;
   }
 }
 
@@ -724,13 +741,50 @@ function applyRenderedResult(key, plan, rawHtml) {
 
 function showGenerationError(key, error, options = {}) {
   const errorMessage = normalizeGenerationError(error);
-  const errorHtml = `<section class="report-shell"><h1>생성 오류</h1><p>${escapeHtml(errorMessage)}</p></section>`;
+  const errorHtml = buildGenerationErrorHtml({
+    key,
+    stage: options.stage || "생성",
+    message: errorMessage,
+    diagnostics: getErrorDiagnostics(error),
+    canRerender: Boolean(options.plan)
+  });
   activeResults[key] = options.plan
     ? { plan: options.plan, rawHtml: null, printDocument: null }
     : null;
   elements.results[key].frame.srcdoc = buildReportDocument(errorHtml, { alreadySafe: true });
   setResultActions(key, { pdf: false, rerender: Boolean(options.plan) });
   setResultState(key, "error", "오류");
+}
+
+function buildGenerationErrorHtml({ key, stage, message, diagnostics, canRerender }) {
+  const rows = [
+    ["대상", `${key}안`],
+    ["실패 단계", stage],
+    ["오류", message],
+    ["다음 조치", canRerender ? "설계 JSON은 확보되었습니다. 재변환으로 HTML 렌더링만 다시 시도할 수 있습니다." : "설계 JSON 생성 단계에서 실패했습니다. 입력량, 모델 응답 형식, LLM 서버 로그를 확인하세요."]
+  ];
+
+  const detailBlocks = diagnostics
+    .filter((item) => item?.label || item?.value)
+    .map((item) => `
+      <section style="margin-top: 14px;">
+        <h3 style="margin: 0 0 6px; font-size: 14px; color: #cf8117;">${escapeHtml(item.label || "진단 정보")}</h3>
+        <pre style="background: #f5f5f2; border: 1px solid #d7d2ca; border-radius: 6px; color: #222; font-family: Consolas, 'Courier New', monospace; font-size: 11px; line-height: 1.5; margin: 0; max-height: 240px; overflow: auto; padding: 10px; white-space: pre-wrap;">${escapeHtml(item.value || "")}</pre>
+      </section>
+    `)
+    .join("");
+
+  return `
+    <section class="report-shell">
+      <h1>생성 오류</h1>
+      <table>
+        <tbody>
+          ${rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join("")}
+        </tbody>
+      </table>
+      ${detailBlocks || "<p>추가 진단 정보가 없습니다.</p>"}
+    </section>
+  `;
 }
 
 function buildUserContent(requestText, classification) {
@@ -932,6 +986,22 @@ function setResultState(key, status, label) {
 function setMessage(message, type = "info") {
   elements.generationMessage.textContent = message;
   elements.generationMessage.dataset.type = type;
+}
+
+function previewDiagnosticText(value, limit = 1400) {
+  const text = String(value || "").trim();
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, limit)}\n... (${text.length - limit}자 더 있음)`;
+}
+
+function shortStatusMessage(message, limit = 90) {
+  const text = String(message || "").replace(/\s+/g, " ").trim();
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, limit)}...`;
 }
 
 function showActionError(error) {

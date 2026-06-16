@@ -26,6 +26,7 @@ Copy-Item .env.example .env
 OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:30000/v1
 OPENAI_COMPATIBLE_API_KEY=
 LLM_MODEL=Qwen3.6
+MAX_TOTAL_FILE_CHARS=180000
 APP_ACCESS_PASSWORD=admin
 APP_SESSION_SECRET=
 APP_SESSION_MAX_AGE_SECONDS=28800
@@ -36,6 +37,7 @@ APP_PORT=5173
 `OPENAI_COMPATIBLE_BASE_URL`에는 `/v1`까지 포함하세요. 앱은 `/chat/completions`를 자동으로 붙입니다.
 설정값은 화면에 표시하지 않습니다.
 `APP_ACCESS_PASSWORD`는 운영 전에 반드시 변경하세요.
+`MAX_TOTAL_FILE_CHARS`는 첨부 자료에서 추출해 1차 LLM 요청에 넣을 최대 글자 수입니다. 32k급 컨텍스트로 서빙한다면 50000~70000 정도로 낮추고, 128k 이상이면 기본값을 사용할 수 있습니다.
 
 ## 실행
 

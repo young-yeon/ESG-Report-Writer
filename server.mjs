@@ -25,7 +25,11 @@ const config = {
     process.env.OPENAI_COMPATIBLE_API_KEY ||
     env.OPENAI_COMPATIBLE_API_KEY ||
     "",
-  model: process.env.LLM_MODEL || env.LLM_MODEL || "Qwen3.6"
+  model: process.env.LLM_MODEL || env.LLM_MODEL || "Qwen3.6",
+  maxTotalFileChars: readPositiveNumber(
+    process.env.MAX_TOTAL_FILE_CHARS || env.MAX_TOTAL_FILE_CHARS,
+    180000
+  )
 };
 
 const mimeTypes = {
@@ -322,6 +326,11 @@ function readEnvFile(path) {
     result[key] = value;
   }
   return result;
+}
+
+function readPositiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
 function safeStaticPath(pathname) {
