@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ESG Report Writer</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/runtime-config.js"></script>
+    <script type="module" src="/src/app.js?v=20260616-modules"></script>
+  </head>
+  <body>
+    <div class="auth-overlay" id="authOverlay">
+      <form class="auth-card" id="authForm">
+        <p class="eyebrow">Private Access</p>
+        <h1>접속 비밀번호</h1>
+        <label class="field">
+          <span>비밀번호</span>
+          <input id="accessPasswordInput" type="password" autocomplete="current-password">
+        </label>
+        <button class="primary-button" type="submit">접속</button>
+        <p class="helper-text" id="authMessage"></p>
+      </form>
+    </div>
+
+    <div class="app-shell is-locked" id="appShell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">ESG Draft</p>
+          <h1>ESG 보고서 작성</h1>
+        </div>
+        <div class="category-pill" id="classificationBadge" data-category="none">분류 대기</div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-panel" aria-label="작성 설정">
+          <section class="panel-section">
+            <div class="section-heading">
+              <h2>첨부 자료</h2>
+              <span class="muted">PDF/XLSX/CSV/TXT</span>
+            </div>
+            <label class="file-drop">
+              <input id="fileInput" type="file" multiple accept=".pdf,.xlsx,.csv,.txt,.text,text/plain,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+              <span>업로드</span>
+            </label>
+            <div class="file-list" id="fileList"></div>
+          </section>
+
+          <section class="panel-section" id="systemPromptSection">
+            <div class="section-heading">
+              <h2>시스템 프롬프트</h2>
+              <div class="section-actions">
+                <button class="prompt-fullscreen-button" id="systemPromptFullscreenButton" type="button">전체 화면</button>
+                <button class="ghost-button" id="resetPromptButton" type="button">기본값</button>
+              </div>
+            </div>
+            <label class="field">
+              <span>프롬프트 이름</span>
+              <input id="promptNameInput" type="text" placeholder="예: 지속가능경영 보고서 초안">
+            </label>
+            <label class="field">
+              <span>저장된 프롬프트</span>
+              <select id="savedPromptSelect"></select>
+            </label>
+            <textarea id="systemPromptInput" class="system-prompt" spellcheck="false"></textarea>
+            <div class="button-row">
+              <button id="savePromptButton" type="button">저장</button>
+              <button class="ghost-button" id="deletePromptButton" type="button">삭제</button>
+            </div>
+          </section>
+
+          <section class="panel-section" id="requestPromptSection">
+            <div class="section-heading">
+              <h2>작성 요청</h2>
+              <div class="section-actions">
+                <button class="prompt-fullscreen-button" id="requestPromptFullscreenButton" type="button">전체 화면</button>
+                <button class="ghost-button" id="resetRequestPromptButton" type="button">기본값</button>
+              </div>
+            </div>
+            <label class="field">
+              <span>요청 이름</span>
+              <input id="requestPromptNameInput" type="text" placeholder="예: 환경 성과 섹션">
+            </label>
+            <label class="field">
+              <span>저장된 요청</span>
+              <select id="savedRequestPromptSelect"></select>
+            </label>
+            <textarea
+              id="requestInput"
+              class="request-input"
+              placeholder="요청 내용을 입력하세요."
+            ></textarea>
+            <div class="button-row">
+              <button id="saveRequestPromptButton" type="button">저장</button>
+              <button class="ghost-button" id="deleteRequestPromptButton" type="button">삭제</button>
+              <button id="clearButton" class="ghost-button subtle-button" type="button">초기화</button>
+            </div>
+            <div class="button-row sticky-actions">
+              <button id="generateButton" class="primary-button" type="button">초안 생성</button>
+            </div>
+            <p class="helper-text" id="generationMessage"></p>
+          </section>
+        </aside>
+
+        <section class="result-area" aria-label="생성 결과">
+          <article class="result-panel" id="resultA">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Version A</p>
+                <h2>A안</h2>
+              </div>
+              <div class="result-tools">
+                <button type="button" class="rerender-button" disabled>재변환</button>
+                <button type="button" class="fullscreen-button">전체 화면</button>
+                <span class="status-badge" data-status="idle">대기</span>
+              </div>
+            </div>
+            <iframe title="버전 A 결과" sandbox="" class="result-frame"></iframe>
+            <div class="result-footer">
+              <button type="button" class="pdf-button" disabled>PDF 다운로드</button>
+            </div>
+          </article>
+
+          <article class="result-panel" id="resultB">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Version B</p>
+                <h2>B안</h2>
+              </div>
+              <div class="result-tools">
+                <button type="button" class="rerender-button" disabled>재변환</button>
+                <button type="button" class="fullscreen-button">전체 화면</button>
+                <span class="status-badge" data-status="idle">대기</span>
+              </div>
+            </div>
+            <iframe title="버전 B 결과" sandbox="" class="result-frame"></iframe>
+            <div class="result-footer">
+              <button type="button" class="pdf-button" disabled>PDF 다운로드</button>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

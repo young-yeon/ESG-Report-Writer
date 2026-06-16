@@ -1,0 +1,9 @@
+.env
+node_modules/
+dist/
+.tmp_esg_server.pid
+.tmp_esg_server.*.log
+.playwright-mcp/
+tmp/
+.DS_Store
+Thumbs.db
