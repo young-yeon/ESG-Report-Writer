@@ -9,9 +9,15 @@ export async function callChatCompletion({
   variantGuide = "",
   temperature = 0.55,
   topP = 0.9,
-  maxTokens = 6000
+  maxTokens = 6000,
+  thinkingMode = "disabled"
 }) {
   const endpoint = getChatEndpoint(baseUrl);
+  const requestedThinkingMode = normalizeThinkingMode(thinkingMode);
+  const effectiveThinkingMode = resolveThinkingMode(requestedThinkingMode, model);
+  const thinkingModeLabel = requestedThinkingMode === effectiveThinkingMode
+    ? effectiveThinkingMode
+    : `${requestedThinkingMode} -> ${effectiveThinkingMode}`;
   const headers = {
     "Content-Type": "application/json"
   };
@@ -22,23 +28,27 @@ export async function callChatCompletion({
 
   let response;
   try {
+    const requestBody = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: buildUserMessage(userContent, variantGuide, effectiveThinkingMode) }
+      ],
+      temperature,
+      top_p: topP,
+      max_tokens: maxTokens
+    };
+    applyThinkingMode(requestBody, effectiveThinkingMode);
+
     response = await fetch(endpoint, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: buildUserMessage(userContent, variantGuide) }
-        ],
-        temperature,
-        top_p: topP,
-        max_tokens: maxTokens
-      })
+      body: JSON.stringify(requestBody)
     });
   } catch (error) {
     throw createDiagnosticError("LLM 서버에 연결할 수 없습니다.", [
       { label: "호출 엔드포인트", value: endpoint },
+      { label: "Thinking 모드", value: thinkingModeLabel },
       { label: "브라우저 오류", value: error.message || String(error) }
     ]);
   }
@@ -48,6 +58,7 @@ export async function callChatCompletion({
     throw createDiagnosticError(extractErrorMessage(responseText, response.status), [
       { label: "HTTP 상태", value: String(response.status) },
       { label: "호출 엔드포인트", value: endpoint },
+      { label: "Thinking 모드", value: thinkingModeLabel },
       { label: "응답 길이", value: `${responseText.length}자` },
       { label: "응답 미리보기", value: previewText(responseText) || "빈 응답" }
     ]);
@@ -60,6 +71,7 @@ export async function callChatCompletion({
     throw createDiagnosticError("LLM 서버 응답을 JSON으로 해석할 수 없습니다.", [
       { label: "HTTP 상태", value: String(response.status) },
       { label: "호출 엔드포인트", value: endpoint },
+      { label: "Thinking 모드", value: thinkingModeLabel },
       { label: "응답 길이", value: `${responseText.length}자` },
       { label: "응답 미리보기", value: previewText(responseText) || "빈 응답" }
     ]);
@@ -70,6 +82,7 @@ export async function callChatCompletion({
     throw createDiagnosticError("LLM 응답에서 본문을 찾을 수 없습니다.", [
       { label: "HTTP 상태", value: String(response.status) },
       { label: "호출 엔드포인트", value: endpoint },
+      { label: "Thinking 모드", value: thinkingModeLabel },
       { label: "응답 구조", value: summarizeChatResponse(data) },
       { label: "응답 미리보기", value: previewJson(data) }
     ]);
@@ -77,12 +90,18 @@ export async function callChatCompletion({
   return content;
 }
 
-function buildUserMessage(userContent, variantGuide) {
+function buildUserMessage(userContent, variantGuide, thinkingMode) {
   const guide = String(variantGuide || "").trim();
-  if (!guide) {
-    return userContent;
+  const sections = [userContent];
+  if (guide) {
+    sections.push(`[출력 버전 지침]\n${guide}`);
   }
-  return `${userContent}\n\n[출력 버전 지침]\n${guide}`;
+  if (thinkingMode === "disabled" || thinkingMode === "soft") {
+    sections.push("/no_think");
+  } else if (thinkingMode === "enabled") {
+    sections.push("/think");
+  }
+  return sections.join("\n\n");
 }
 
 export function normalizeGenerationError(error) {
@@ -127,6 +146,33 @@ function getChatEndpoint(baseUrl) {
     return trimmed;
   }
   return `${trimmed}/chat/completions`;
+}
+
+function applyThinkingMode(requestBody, thinkingMode) {
+  if (thinkingMode === "disabled") {
+    requestBody.chat_template_kwargs = { enable_thinking: false };
+  } else if (thinkingMode === "enabled") {
+    requestBody.chat_template_kwargs = { enable_thinking: true };
+  }
+}
+
+function normalizeThinkingMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["auto", "disabled", "soft", "server", "enabled"].includes(normalized)
+    ? normalized
+    : "auto";
+}
+
+function resolveThinkingMode(thinkingMode, model) {
+  if (thinkingMode !== "auto") {
+    return thinkingMode;
+  }
+
+  return isQwen3Model(model) ? "disabled" : "server";
+}
+
+function isQwen3Model(model) {
+  return /qwen\s*[-_. ]?3/i.test(String(model || ""));
 }
 
 function extractErrorMessage(responseText, status) {

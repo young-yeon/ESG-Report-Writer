@@ -616,7 +616,8 @@ async function generateReportPlan({
     variantGuide,
     temperature: 0.35,
     topP: 0.85,
-    maxTokens: 4200
+    maxTokens: 4200,
+    thinkingMode: appConfig.thinkingMode
   });
   return normalizeReportPlan(parseModelJson(rawPlan), classification);
 }
@@ -637,7 +638,8 @@ async function renderReportHtml({
     variantGuide,
     temperature: 0.5,
     topP: 0.9,
-    maxTokens: 6500
+    maxTokens: 6500,
+    thinkingMode: appConfig.thinkingMode
   });
 }
 

@@ -26,6 +26,7 @@ const config = {
     env.OPENAI_COMPATIBLE_API_KEY ||
     "",
   model: process.env.LLM_MODEL || env.LLM_MODEL || "Qwen3.6",
+  thinkingMode: readThinkingMode(process.env.LLM_THINKING_MODE || env.LLM_THINKING_MODE),
   maxTotalFileChars: readPositiveNumber(
     process.env.MAX_TOTAL_FILE_CHARS || env.MAX_TOTAL_FILE_CHARS,
     180000
@@ -331,6 +332,13 @@ function readEnvFile(path) {
 function readPositiveNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function readThinkingMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["auto", "disabled", "soft", "server", "enabled"].includes(normalized)
+    ? normalized
+    : "auto";
 }
 
 function safeStaticPath(pathname) {

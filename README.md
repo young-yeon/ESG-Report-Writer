@@ -26,6 +26,7 @@ Copy-Item .env.example .env
 OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:30000/v1
 OPENAI_COMPATIBLE_API_KEY=
 LLM_MODEL=Qwen3.6
+LLM_THINKING_MODE=auto
 MAX_TOTAL_FILE_CHARS=180000
 APP_ACCESS_PASSWORD=admin
 APP_SESSION_SECRET=
@@ -37,6 +38,7 @@ APP_PORT=5173
 `OPENAI_COMPATIBLE_BASE_URL`에는 `/v1`까지 포함하세요. 앱은 `/chat/completions`를 자동으로 붙입니다.
 설정값은 화면에 표시하지 않습니다.
 `APP_ACCESS_PASSWORD`는 운영 전에 반드시 변경하세요.
+`LLM_THINKING_MODE`는 reasoning 출력을 제어합니다. 기본값 `auto`는 모델명이 Qwen3 계열이면 `chat_template_kwargs.enable_thinking=false`와 `/no_think`를 함께 보내고, 그 외 모델은 서버 기본 동작을 그대로 둡니다. 서버가 `chat_template_kwargs`를 거부하면 `soft`로 바꿔 `/no_think`만 보내고, 어떤 제어도 하지 않으려면 `server`로 설정합니다.
 `MAX_TOTAL_FILE_CHARS`는 첨부 자료에서 추출해 1차 LLM 요청에 넣을 최대 글자 수입니다. 32k급 컨텍스트로 서빙한다면 50000~70000 정도로 낮추고, 128k 이상이면 기본값을 사용할 수 있습니다.
 
 ## 실행
