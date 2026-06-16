@@ -18,7 +18,7 @@ import {
   isContextLimitError,
   normalizeGenerationError
 } from "./llm.js";
-import { buildPrintableDocument, buildReportDocument } from "./report-renderer.js";
+import { buildReportDocument } from "./report-renderer.js";
 import { createId, escapeHtml, formatBytes, formatNumber, getFileExtension } from "./utils.js";
 
 try {
@@ -730,7 +730,7 @@ function normalizeTableSpec(value) {
 }
 
 function applyRenderedResult(key, plan, rawHtml) {
-  const printDocument = buildReportDocument(rawHtml);
+  const printDocument = buildReportDocument(rawHtml, { accent: plan.accent });
   activeResults[key] = {
     plan,
     rawHtml,
@@ -859,23 +859,75 @@ async function rerenderResult(key) {
   }
 }
 
-function printResult(key) {
+async function printResult(key) {
   const result = activeResults[key];
   if (!result?.printDocument) {
     return;
   }
 
-  const printWindow = window.open("about:blank", "_blank");
-  if (!printWindow) {
-    setMessage("팝업 차단을 해제한 뒤 PDF 다운로드를 다시 눌러주세요.", "error");
-    return;
+  const filename = buildPdfFilename(key, result.plan);
+  elements.results[key].pdfButton.disabled = true;
+  setMessage(`${key}안 PDF 생성 중`, "loading");
+
+  try {
+    const response = await fetch("/api/pdf", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename,
+        html: result.printDocument
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(await readPdfErrorMessage(response));
+    }
+
+    const blob = await response.blob();
+    downloadBlob(blob, filename);
+    setMessage(`${key}안 PDF 다운로드를 준비했습니다.`, "done");
+  } catch (error) {
+    setMessage(error.message || "PDF 생성 중 오류가 발생했습니다.", "error");
+  } finally {
+    elements.results[key].pdfButton.disabled = !activeResults[key]?.printDocument;
+  }
+}
+
+async function readPdfErrorMessage(response) {
+  const contentType = response.headers.get("Content-Type") || "";
+  if (contentType.includes("application/json")) {
+    const data = await response.json().catch(() => null);
+    return data?.error || `PDF 생성 실패 (${response.status})`;
   }
 
-  const printableDocument = buildPrintableDocument(result.printDocument);
-  printWindow.document.open();
-  printWindow.document.write(printableDocument);
-  printWindow.document.close();
-  setMessage("인쇄 창을 열었습니다. 대상 프린터를 PDF로 저장으로 선택하세요.", "done");
+  const text = await response.text().catch(() => "");
+  return text || `PDF 생성 실패 (${response.status})`;
+}
+
+function buildPdfFilename(key, plan) {
+  const title = String(plan?.title || "report").trim();
+  return sanitizeDownloadName(`ESG_${key}안_${title}.pdf`);
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || "esg-report.pdf")
+    .normalize("NFKC")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100) || "esg-report.pdf";
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function toggleFullscreen(key) {

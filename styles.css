@@ -24,7 +24,7 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
-  font-family: Arial, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  font-family: "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", Arial, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
 }
 
 button,

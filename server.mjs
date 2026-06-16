@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const env = readEnvFile(join(rootDir, ".env"));
@@ -31,6 +33,13 @@ const config = {
     process.env.MAX_TOTAL_FILE_CHARS || env.MAX_TOTAL_FILE_CHARS,
     180000
   )
+};
+
+const pdfConfig = {
+  chromiumPath: process.env.PDF_CHROMIUM_PATH || env.PDF_CHROMIUM_PATH || "",
+  noSandbox: readBoolean(process.env.PDF_CHROMIUM_NO_SANDBOX || env.PDF_CHROMIUM_NO_SANDBOX, false),
+  timeoutMs: readPositiveNumber(process.env.PDF_RENDER_TIMEOUT_MS || env.PDF_RENDER_TIMEOUT_MS, 60000),
+  maxHtmlBytes: readPositiveNumber(process.env.PDF_MAX_HTML_BYTES || env.PDF_MAX_HTML_BYTES, 8 * 1024 * 1024)
 };
 
 const mimeTypes = {
@@ -187,7 +196,216 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
+  if (pathname === "/api/pdf" && req.method === "POST") {
+    const body = await readJsonBody(req, pdfConfig.maxHtmlBytes * 2);
+    const html = String(body.html || "").trim();
+    if (!html) {
+      sendJson(res, 400, { error: "PDF로 변환할 HTML이 없습니다." });
+      return;
+    }
+
+    if (Buffer.byteLength(html, "utf8") > pdfConfig.maxHtmlBytes) {
+      sendJson(res, 413, { error: "PDF로 변환할 HTML이 너무 큽니다." });
+      return;
+    }
+
+    try {
+      const filename = normalizePdfFilename(body.filename);
+      const pdf = await renderHtmlToPdf(html);
+      send(res, 200, "application/pdf", pdf, {
+        "Content-Disposition": buildContentDisposition(filename)
+      });
+    } catch (error) {
+      sendJson(res, 500, { error: `PDF 변환 실패: ${error.message}` });
+    }
+    return;
+  }
+
   sendJson(res, 404, { error: "Not Found" });
+}
+
+async function renderHtmlToPdf(html) {
+  const tempDir = await mkdtemp(join(tmpdir(), "esg-report-pdf-"));
+  const htmlPath = join(tempDir, "report.html");
+  const pdfPath = join(tempDir, "report.pdf");
+
+  try {
+    await writeFile(htmlPath, preparePdfHtml(html), "utf8");
+
+    const candidates = getChromiumCandidates();
+    const notFoundMessages = [];
+    for (const command of candidates) {
+      const result = await runChromium(command, htmlPath, pdfPath);
+      if (result.ok) {
+        return readFile(pdfPath);
+      }
+
+      if (result.notFound) {
+        notFoundMessages.push(command);
+        continue;
+      }
+
+      throw new Error(`${command}: ${result.message}`);
+    }
+
+    throw new Error(
+      `Chromium/Chrome 실행 파일을 찾을 수 없습니다. PDF_CHROMIUM_PATH를 설정하세요. 시도: ${notFoundMessages.join(", ")}`
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function getChromiumCandidates() {
+  return uniqueStrings([
+    pdfConfig.chromiumPath,
+    "chromium",
+    "chromium-browser",
+    "google-chrome-stable",
+    "google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+  ]);
+}
+
+function runChromium(command, htmlPath, pdfPath) {
+  const args = [
+    "--headless",
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disable-gpu-rasterization",
+    "--disable-accelerated-2d-canvas",
+    "--disable-accelerated-video-decode",
+    "--disable-dev-shm-usage",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--disable-features=UseSkiaRenderer,VizDisplayCompositor",
+    "--hide-scrollbars",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--use-gl=swiftshader",
+    `--user-data-dir=${htmlPath}.profile`,
+    `--disk-cache-dir=${htmlPath}.cache`,
+    "--no-pdf-header-footer",
+    "--print-to-pdf-no-header",
+    `--print-to-pdf=${pdfPath}`,
+    pathToFileURL(htmlPath).href
+  ];
+
+  if (pdfConfig.noSandbox) {
+    args.unshift("--no-sandbox");
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    let didTimeout = false;
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      didTimeout = true;
+      child.kill("SIGKILL");
+    }, pdfConfig.timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      stdout = appendDiagnostic(stdout, chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+    child.on("error", (error) => {
+      finish({
+        ok: false,
+        notFound: error.code === "ENOENT",
+        message: error.message
+      });
+    });
+    child.on("close", (code) => {
+      if (didTimeout) {
+        finish({ ok: false, message: `${pdfConfig.timeoutMs}ms 안에 PDF 변환이 끝나지 않았습니다.` });
+        return;
+      }
+
+      if (code === 0 && existsSync(pdfPath)) {
+        finish({ ok: true });
+        return;
+      }
+
+      finish({
+        ok: false,
+        message: compactDiagnostic([
+          `종료 코드 ${code}`,
+          stderr && `stderr: ${stderr}`,
+          stdout && `stdout: ${stdout}`
+        ])
+      });
+    });
+  });
+}
+
+function preparePdfHtml(html) {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; script-src 'none';">`;
+  if (/<head[\s>]/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>\n${csp}`);
+  }
+
+  return `<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    ${csp}
+  </head>
+  <body>${html}</body>
+</html>`;
+}
+
+function normalizePdfFilename(value) {
+  const base = String(value || "esg-report")
+    .normalize("NFKC")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100) || "esg-report";
+  return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
+}
+
+function buildContentDisposition(filename) {
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function appendDiagnostic(current, chunk) {
+  return `${current}${chunk.toString("utf8")}`.slice(-4000);
+}
+
+function compactDiagnostic(parts) {
+  return parts.filter(Boolean).join(" | ").slice(0, 4000);
+}
+
+function uniqueStrings(values) {
+  return values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index);
 }
 
 async function ensurePromptStore() {
@@ -332,6 +550,17 @@ function readEnvFile(path) {
 function readPositiveNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function readBoolean(value, fallback) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "n", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
 }
 
 function readThinkingMode(value) {

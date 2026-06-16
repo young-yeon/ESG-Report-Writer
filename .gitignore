@@ -1,6 +1,8 @@
 .env
 node_modules/
 dist/
+rpm-bundle/
+.dnf-x86_64-root/
 .tmp_esg_server.pid
 .tmp_esg_server.*.log
 .playwright-mcp/
